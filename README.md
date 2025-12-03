@@ -7,5 +7,5 @@ For this project I randomly took 10 sequences; 5 from tumor biopsy and 5 from no
 
 Through this project I hope to explore the following research questions: 
   
-#Q1: Do tumor tissues show different phylogenetic diversity than adjacent normal tissues?
+#Q1:Do tumor tissues show different phylogenetic diversity than adjacent normal tissues?
 #Q2 (Secondary): Are patterns consistent across both studies?
