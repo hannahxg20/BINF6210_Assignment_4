@@ -5,16 +5,19 @@
 ##
 ## Topic: Microbiome of the Colon in Colon Cancer Patients
 ## 
-## Topic: Microbiome of the Colon in Colon Cancer Patients
-## 
-## #Q1: Do tumor tissues show different phylogenetic diversity than adjacent normal tissues? #Q2 (Secondary): Are patterns consistent across both studies?
+## #Q1: Do tumor tissues show different phylogenetic diversity than adjacent normal tissues? 
+## #Q2 (Secondary): Are patterns consistent across both studies?
 ##********************************
 
 ##_Packeges Used ------
+
+##_Original script Used -----
+
 library(dada2)
 library(DECIPHER)
-library(phyloseq)
+library(phangorn)
 
+library(phyloseq)
 library(picante)
 library(vegan)
 library(ggplot2)
@@ -28,7 +31,7 @@ set.seed(123)
 #For this project: Randomly taken 10 sequences; 5 from tumor biopsy and 5 from normal adjecent tissue, from each study (total of 20 sequences). 
 
 
-#_Step 1: Quality Control using DADA2 -----
+#_Step 1: Quality Control using DADA2 (2 hrs to run) -----
 # Set working directory to BINF_Assignment_4, then define path to raw zipped FASTQ files 
 path <- "FASTQ_Data/"
 list.files(path)
@@ -39,7 +42,6 @@ fnRs <- sort(list.files(path = path, pattern = "_2.fastq.gz", full.names = TRUE)
 
 # Extract SRA sample names
 sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
-
 
 ## Inspect read quality profiles
 plotQualityProfile(fnFs[c(1,6,11,16)])
@@ -63,7 +65,7 @@ out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(280, 220), trimLeft=
 head(out)
 
 
-#Calculate percentage of reads retained - good retention 
+#Calculate percentage of reads retained - good retention between 80-90%
 out <- as.data.frame(out)
 out$percent_retained <- (out$reads.out / out$reads.in) * 100
 out
@@ -101,6 +103,11 @@ dim(seqtab)
 
 # Inspect distribution of sequence lengths
 sort(table(nchar(getSequences(seqtab))), decreasing = TRUE)
+#Top sequences by abundance: 440bp: 3,565 sequences
+#Distribution is good (tight clustering around 440-446bp)! This is exactly where V3-V4 amplicons should be = will keep my current parameters of  truncLen=c(280, 220)
+
+#Successful merging - instead of anticipated 40 bp overlap, there is 280 + 220 - 440 = 60 bp overlap (even better) 
+
 
 ## Remove chimeras 
 seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE) 
@@ -117,7 +124,7 @@ getN <- function(x) sum(getUniques(x))
 track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(merger, getN), rowSums(seqtab.nochim))
 
 #Make output readable
-colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+colnames(track) <- c("input", "filtered", "percent_retained", "denoisedF", "denoisedR", "merged", "nonchim")
 rownames(track) <- sample.names
 head(track)
 
@@ -125,17 +132,46 @@ head(track)
 rm(derepFs, derepRs, dadaFs, dadaRs, merger, seqtab)
 gc()
 
+#----- SAVE CHECKPOINT - DADA2 COMPLETE -----
+
+# Create directory for saved objects if it doesn't exist
+if(!dir.exists("RDS_objects")) dir.create("RDS_objects")
+
+message("Saving DADA2 pipeline results...")
+
+# Save essential objects for next steps
+saveRDS(seqtab.nochim, "RDS_objects/seqtab_nochim.rds")
+saveRDS(track, "RDS_objects/track.rds")
+saveRDS(sample.names, "RDS_objects/sample_names.rds")
+
+# Save the ASV sequences separately (needed for taxonomy assignment)
+asv_seqs <- colnames(seqtab.nochim)
+saveRDS(asv_seqs, "RDS_objects/asv_sequences.rds")
+
+# Save filtering stats for reference
+saveRDS(out, "RDS_objects/filtering_stats.rds")
+
 #_Step 2: Assign Taxonomy with Decipher -----
+#Start up to skip 2 hr DADA2 pipeline in Step 1.
+seqtab.nochim <- readRDS("RDS_objects/seqtab_nochim.rds")
+sample.names <- readRDS("RDS_objects/sample_names.rds")
+asv_seqs <- readRDS("RDS_objects/asv_sequences.rds")
+track <- readRDS("RDS_objects/track.rds")
+
 
 #Downloaded SILVA_SSU_r138_2_2024.RData from: https://www2.decipher.codes/Downloads.html
 
 # Load the training set
-silva_path <- "R/SILVA_SSU_r138_2_2024.RData"
+silva_path <- "SILVA/SILVA_SSU_r138_2_2024.RData"
 load(silva_path)
 
 # Assign taxonomy
-dna <- DNAStringSet(getSequences(seqtab.nochim))
-ids <- IdTaxa(dna, trainingSet, strand="top", processors=NULL, verbose=TRUE)
+dna <- DNAStringSet(getSequences(seqtab.nochim)) #Takes 10 mins
+ids <- IdTaxa(dna, trainingSet, strand="top", processors=NULL, verbose=TRUE) #Takes 35 mins
+
+#Check - IdTaxa ran correctly 
+ids[[1]]
+#everything appears to be working - Taxonomy assigned, output structure is correct
 
 # Extract taxonomy
 ranks <- c("domain", "phylum", "class", "order", "family", "genus", "species")
@@ -157,32 +193,81 @@ dim(taxa)  # Should be [2461 rows x 7 columns]
 rm(trainingSet, ids, dna)
 gc()
 
+#----- SAVE CHECKPOINT - TAXONOMY ASSIGNMENT COMPLETE -----
+
+# Save taxonomy table
+saveRDS(taxa, "RDS_objects/taxa.rds")
+
 #_Step 3: Create Phylogenetic Tree (Neighbor joining only) using Decipher & phangorn -----
+#Load required objects if not already in memory 
+seqtab.nochim <- readRDS("RDS_objects/seqtab_nochim.rds")
+sample.names <- readRDS("RDS_objects/sample_names.rds")
+track <- readRDS("RDS_objects/track.rds")
+taxa <- readRDS("RDS_objects/taxa.rds")
+
+#Extract ASV sequences
 seqs <- getSequences(seqtab.nochim)
 names(seqs) <- seqs
 
-# Quick alignment
-alignment <- AlignSeqs(DNAStringSet(seqs), anchor = NA, verbose = FALSE)
+# Quick alignment - takes 20 mins
+alignment <- AlignSeqs(DNAStringSet(seqs), anchor = NA, verbose = TRUE)
 
-# Fast tree (NJ only, skip optimization)
+# Fast tree using phangorn package (NJ only, skip optimization) this takes about 10 mins
 phang.align <- phyDat(as(alignment, "matrix"), type = "DNA")
 dm <- dist.ml(phang.align)
-tree <- NJ(dm)
+tree <- NJ(dm) #unrooted phylogenetic tree with 2461 tips and 2459 internal nodes.
 
 # Clean up
 rm(alignment, phang.align, dm)
 gc
 
+#----- SAVE CHECKPOINT - PHYLOGENETIC TREE COMPLETE -----
+
+saveRDS(tree, "RDS_objects/tree.rds")
+
 #_Step 4: Create Metadata & Phyloseq -----
 
-#Check order sample names (back in Step 1: Using Quality Control using DADA2)
+# Load required objects
+seqtab.nochim <- readRDS("RDS_objects/seqtab_nochim.rds")
+taxa <- readRDS("RDS_objects/taxa.rds")
+tree <- readRDS("RDS_objects/tree.rds")
+sample.names <- readRDS("RDS_objects/sample_names.rds")
+
+#Check order sample names (back in Step 1: Using Quality Control using DADA2) & cross reference with tissue/study using "SraAccessionList" excel in the FASTQ_Data folder. 
 print(sample.names)
 
-# Create METADATA - adjusted to match sample order
+# Create metadata - MANUALLY MATCHED to your print(sample.names) output
 metadata <- data.frame(
   sample_id = sample.names,
-  tissue_type = rep(c(rep("tumor", 5), rep("normal", 5)), 2),  # Adjust!
-  study_id = c(rep("study1", 10), rep("study2", 10))          # Adjust!
+  tissue_type = c(
+    # Study 2 samples (positions 1-10)
+    "tumor",   # [1] SRR25305896
+    "tumor",   # [2] SRR25305897
+    "tumor",   # [3] SRR25305898
+    "tumor",   # [4] SRR25305899
+    "normal",  # [5] SRR25305917
+    "normal",  # [6] SRR25305918
+    "normal",  # [7] SRR25305919
+    "normal",  # [8] SRR25305920
+    "normal",  # [9] SRR25305921
+    "tumor",   # [10] SRR25374795
+    # Study 1 samples (positions 11-20)
+    "normal",  # [11] SRR32497531
+    "normal",  # [12] SRR32497532
+    "normal",  # [13] SRR32497533
+    "normal",  # [14] SRR32497534
+    "normal",  # [15] SRR32497535
+    "tumor",   # [16] SRR32497540
+    "tumor",   # [17] SRR32497541
+    "tumor",   # [18] SRR32497542
+    "tumor",   # [19] SRR32497543
+    "tumor"    # [20] SRR32497544
+  ),
+  study_id = c(
+    rep("study2", 10),  # First 10 samples are Study 2
+    rep("study1", 10)   # Last 10 samples are Study 1
+  ),
+  stringsAsFactors = FALSE
 )
 rownames(metadata) <- sample.names
 
@@ -198,4 +283,105 @@ ps <- phyloseq(
 
 print(ps)
 
-saveRDS(ps, "phyloseq_object.rds")
+#----- SAVE CHECKPOINT - Metadata COMPLETE -----
+
+saveRDS(metadata, "RDS_objects/metadata.rds")
+saveRDS(ps, "RDS_objects/ps.rds")
+
+#_Step 5: Calculate Diversity metrics using phyloseq, vegan, picante-----
+#Load required fields
+metadata <- readRDS("RDS_objects/metadata.rds")
+ps <- readRDS("RDS_objects/ps.rds")
+
+# Extract components from phyloseq
+otu_table_ps <- otu_table(ps)
+tree_obj <- phy_tree(ps)
+sample_meta <- sample_data(ps)
+
+# Prepare OTU matrix (samples as rows, ASVs as columns)
+# phyloseq stores OTU table with taxa_are_rows = FALSE, so samples are rows
+otu_mat <- as.matrix(otu_table_ps)
+
+message(paste("OTU matrix dimensions:", nrow(otu_mat), "samples x", ncol(otu_mat), "ASVs")) # OTU matrix dimensions: 20 samples x 2461 ASVs
+message(paste("Tree has", length(tree_obj$tip.label), "tips")) # Tree has 2461 tips
+
+# Verify alignment between OTU table and tree
+if(!all(colnames(otu_mat) %in% tree_obj$tip.label)) {
+  stop("ERROR: Some ASVs in OTU table are not in the phylogenetic tree!")
+}
+
+message("✓ OTU table and tree are properly aligned")
+#✓ OTU table and tree are properly aligned
+
+#Alpha diversity - Species Richness & Shanoon (using vegan) 
+richness <- vegan::specnumber(otu_mat)
+shannon <- vegan::diversity(otu_mat, index = "shannon")
+
+#Calculate cophenetic distances (pairwise distances between all tips)
+cop_dist <- cophenetic(tree_obj)
+
+# IMPORTANT difference between vegan vs picante
+#vegan package expects - samples as rows, species as columns
+#picante package expects - species as rows, samples as columns
+#Since picante expect TRANSPOSED matrix (species as rows, samples as columns), we use otu_mat for vegan functions and otu_mat_t (transposed) for picante functions.
+
+otu_mat_t <- t(otu_mat)
+
+## Mean Pairwise Distance (MPD) - average phylogenetic distance between taxa in each sample
+mpd_result <- mpd(otu_mat_t, cop_dist)
+
+#Extract the vector properly from mpd() output
+mpd_vals <- as.vector(mpd_result)
+
+# Standardized Effect Size of MPD (ses.mpd) and NRI
+#Running null model for NRI (99 randomizations, may take 1-2 mins)
+ses_mpd <- ses.mpd(otu_mat_t, cop_dist, 
+                   null.model = "taxa.labels",
+                   abundance.weighted = FALSE, 
+                   runs = 99)
+
+#NRI (Net Relatedness Index) = -1 * ses.mpd
+# Positive NRI = phylogenetic clustering (taxa more related than expected)
+# Negative NRI = phylogenetic overdispersion (taxa less related than expected)
+nri_vals <- ses_mpd$mpd.obs.z * -1 #25 mins
+
+##Verify all vectors have same length (20 samples) - takes time
+message(paste("Richness length:", length(richness)))
+message(paste("Shannon length:", length(shannon)))
+message(paste("MPD length:", length(mpd_vals)))
+message(paste("NRI length:", length(nri_vals)))
+
+# Check if all are length 20
+if(!all(c(length(richness), length(shannon), length(mpd_vals), length(nri_vals)) == 20)) {
+  stop("ERROR: Not all diversity metrics have 20 values!")
+}
+
+## Combining ALL Results 
+results <- data.frame(
+  sample_id = rownames(otu_mat),
+  richness = richness,
+  shannon = shannon,
+  mpd = mpd_vals,
+  nri = nri_vals,
+  stringsAsFactors = FALSE
+)
+
+# Add metadata
+metadata_df <- as.data.frame(sample_meta)
+metadata_df$sample_id <- rownames(metadata_df)
+results <- merge(results, metadata_df, by = "sample_id")
+
+# Reorder columns for clarity
+results <- results[, c("sample_id", "tissue_type", "study_id", "richness", "shannon", "mpd", "nri")]
+
+message("✓ Diversity metrics calculated successfully!")
+print(head(results))
+
+### Summary of Diversity Metrics ------
+#By tissue type
+print(aggregate(cbind(richness, shannon, mpd, nri) ~ tissue_type, data = results, FUN = mean))
+#By study 
+print(aggregate(cbind(richness, shannon, mpd, nri) ~ study_id, data = results, FUN = mean))
+
+#----- SAVE CHECKPOINT - DIVERSITY METRICS COMPLETE -----
+saveRDS(results, "RDS_objects/diversity_metrics_results.rds")
