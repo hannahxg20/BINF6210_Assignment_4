@@ -1,11 +1,11 @@
-# BINF6210_Assignment_4
+# **BINF6210_Assignment_4**
 
-Conducting a small project that related to my field of interest: Gut Microbiome! Specifically, my topic will be looking at the microbiome of the colon in colon cancer patients. 
+Conducting a small *exploratory* project that related to my field of interest: the Gut Microbiome! Specifically, my topic will be looking at the microbiome of the colon in colon cancer patients. 
 
-Brief Background
-For this project I randomly took 10 sequences; 5 from tumor biopsy and 5 from normal adjecent tissue, from each study (total of 20 sequences). U used  Sequence Read Archive (SRA) toolkit to downloads the FASTQ DNA sequence files (zip files located in fastq folder) from the Sequence Read Archive (SRA) on NCBI website. Before downloading, files were screened for 16S sequence data (V3-V4 region) from biopsies of colon cancer patients. To ensure sequence quality and validity, sequence data was only considered if this was in an already published studies within 2020-now time frame (see storyboard for details). Found 2 studies meeting the above criteria.
+**Brief Background:** 
+For this project I randomly took 10 samples - 5 from tumor biopsies and 5 from normal adjecent tissues - from 2 published studies (20 samples total). I used  Sequence Read Archive (SRA) Toolkit to downloads the FASTQ DNA sequence files (zip files located in fastq folder) from the Sequence Read Archive (SRA) on NCBI website. Before downloading, I screened the files to ensure they contained 16S rRNA sequencing data (V3–V4 region) from colon cancer biopsy samples. To ensure data quality and reliability, I only included studies published between 2020 and the present (see storyboard for details). 2 studies met the above criteria.
 
 Through this project I hope to explore the following research questions: 
   
-#Q1:Do tumor tissues show different phylogenetic diversity than adjacent normal tissues?
-#Q2 (Secondary): Are patterns consistent across both studies?
+#Q1:**Within the colon cancer environment, do tumor tissues show different biodiversity compared to adjacent normal tissues?**
+#Q2 (Secondary): **Are these patterns consistent across both studies?**
