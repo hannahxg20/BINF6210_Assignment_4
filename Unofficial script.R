@@ -5,8 +5,7 @@
 ##
 ## Topic: Microbiome of the Colon in Colon Cancer Patients
 ## 
-## #Q1: Do tumor tissues show different phylogenetic diversity than adjacent normal tissues? 
-## #Q2 (Secondary): Are patterns consistent across both studies?
+## #Q1: Within the colorectal cancer (CRC) environment, do tumor tissues show different biodiversity compared to adjacent normal tissues? #Q2 (Secondary): Are patterns consistent across both studies?
 ##********************************
 
 ##_Packeges Used ------
@@ -299,7 +298,6 @@ tree_obj <- phy_tree(ps)
 sample_meta <- sample_data(ps)
 
 # Prepare OTU matrix (samples as rows, ASVs as columns)
-# phyloseq stores OTU table with taxa_are_rows = FALSE, so samples are rows
 otu_mat <- as.matrix(otu_table_ps)
 
 message(paste("OTU matrix dimensions:", nrow(otu_mat), "samples x", ncol(otu_mat), "ASVs")) # OTU matrix dimensions: 20 samples x 2461 ASVs
@@ -313,46 +311,26 @@ if(!all(colnames(otu_mat) %in% tree_obj$tip.label)) {
 message("✓ OTU table and tree are properly aligned")
 #✓ OTU table and tree are properly aligned
 
-#Alpha diversity - Species Richness & Shanoon (using vegan) 
+#Calculate Alpha Diversity Metrics ----
+
+# 1 Species Richness - using vegan  
 richness <- vegan::specnumber(otu_mat)
+
+# 2 Shannon Diversity - using vegan
 shannon <- vegan::diversity(otu_mat, index = "shannon")
 
-#Calculate cophenetic distances (pairwise distances between all tips)
-cop_dist <- cophenetic(tree_obj)
+# 3 Faith's Phylogenetic Diversity - using picante
+library(picante)
+faith_pd_result <- pd(otu_mat, tree_obj, include.root = FALSE)
+faith_pd <- faith_pd_result$PD
 
-# IMPORTANT difference between vegan vs picante
-#vegan package expects - samples as rows, species as columns
-#picante package expects - species as rows, samples as columns
-#Since picante expect TRANSPOSED matrix (species as rows, samples as columns), we use otu_mat for vegan functions and otu_mat_t (transposed) for picante functions.
-
-otu_mat_t <- t(otu_mat)
-
-## Mean Pairwise Distance (MPD) - average phylogenetic distance between taxa in each sample
-mpd_result <- mpd(otu_mat_t, cop_dist)
-
-#Extract the vector properly from mpd() output
-mpd_vals <- as.vector(mpd_result)
-
-# Standardized Effect Size of MPD (ses.mpd) and NRI
-#Running null model for NRI (99 randomizations, may take 1-2 mins)
-ses_mpd <- ses.mpd(otu_mat_t, cop_dist, 
-                   null.model = "taxa.labels",
-                   abundance.weighted = FALSE, 
-                   runs = 99)
-
-#NRI (Net Relatedness Index) = -1 * ses.mpd
-# Positive NRI = phylogenetic clustering (taxa more related than expected)
-# Negative NRI = phylogenetic overdispersion (taxa less related than expected)
-nri_vals <- ses_mpd$mpd.obs.z * -1 #25 mins
-
-##Verify all vectors have same length (20 samples) - takes time
-message(paste("Richness length:", length(richness)))
-message(paste("Shannon length:", length(shannon)))
-message(paste("MPD length:", length(mpd_vals)))
-message(paste("NRI length:", length(nri_vals)))
+## Verify all vectors have same length (20 samples)
+message(paste("Richness length:", length(richness))) #20
+message(paste("Shannon length:", length(shannon))) #20
+message(paste("Faith's PD length:", length(faith_pd))) #20
 
 # Check if all are length 20
-if(!all(c(length(richness), length(shannon), length(mpd_vals), length(nri_vals)) == 20)) {
+if(!all(c(length(richness), length(shannon), length(faith_pd)) == 20)) {
   stop("ERROR: Not all diversity metrics have 20 values!")
 }
 
@@ -361,27 +339,207 @@ results <- data.frame(
   sample_id = rownames(otu_mat),
   richness = richness,
   shannon = shannon,
-  mpd = mpd_vals,
-  nri = nri_vals,
+  faith_pd = faith_pd,
   stringsAsFactors = FALSE
 )
 
-# Add metadata
-metadata_df <- as.data.frame(sample_meta)
+# Convert sample_data to regular data frame and merge
+metadata_df <- data.frame(sample_meta)
 metadata_df$sample_id <- rownames(metadata_df)
 results <- merge(results, metadata_df, by = "sample_id")
 
 # Reorder columns for clarity
-results <- results[, c("sample_id", "tissue_type", "study_id", "richness", "shannon", "mpd", "nri")]
+results <- results[, c("sample_id", "tissue_type", "study_id", "richness", "shannon", "faith_pd")]
 
-message("✓ Diversity metrics calculated successfully!")
 print(head(results))
 
 ### Summary of Diversity Metrics ------
-#By tissue type
-print(aggregate(cbind(richness, shannon, mpd, nri) ~ tissue_type, data = results, FUN = mean))
-#By study 
-print(aggregate(cbind(richness, shannon, mpd, nri) ~ study_id, data = results, FUN = mean))
+#Mean diversity metrics by tissue type
+print(aggregate(cbind(richness, shannon, faith_pd) ~ tissue_type, data = results, FUN = mean))
+
+#Mean diversity metrics by study
+print(aggregate(cbind(richness, shannon, faith_pd) ~ study_id, data = results, FUN = mean))
 
 #----- SAVE CHECKPOINT - DIVERSITY METRICS COMPLETE -----
 saveRDS(results, "RDS_objects/diversity_metrics_results.rds")
+
+#_Step 6: Statistics & Data Visualization-----
+#For this section will use: 
+#library(ggplot2)
+#library(vegan)
+#library(phyloseq)
+theme_set(theme_bw())
+
+# Load your diversity metrics if not already in memory
+results <- readRDS("RDS_objects/diversity_metrics_results.rds")
+ps <- readRDS("RDS_objects/ps.rds")  # If needed for ordination plots
+
+print(head(results))
+
+# Part A: Statistical Tests -----
+#Q1: Wilcoxon Test: Tumor vs Normal (for Q1) ----
+#"Are tumor and normal biopsy tissues different?" 
+#Use Wilcoxon because we only have 10 samples per group (small sample size)
+
+#Test Richness
+richness_test <- wilcox.test(richness ~ tissue_type, data = results)
+cat("  p-value =", richness_test$p.value, "\n")
+
+# p-value (0.7912601) > 0.05 
+# Result: Not significantly different 
+
+#Test Shannon
+shannon_test <- wilcox.test(shannon ~ tissue_type, data = results)
+cat("  p-value =", shannon_test$p.value, "\n")
+
+# p-value (0.9117972) > 0.05
+# Result: Not significantly different 
+
+# Test Faith's PD
+faithpd_test <- wilcox.test(faith_pd ~ tissue_type, data = results)
+cat("  p-value =", faithpd_test$p.value, "\n")
+
+# p-value (0.9705125 )) > 0.05
+# Result: Not significantly different 
+
+#Q2: Consistency across 2 studies -----
+#"Do both studies show the same pattern?"
+
+# Split by study and compare
+study1_data <- subset(results, study_id == "study1")
+study2_data <- subset(results, study_id == "study2")
+
+# Study 1: Tumor vs Normal
+study1_rich <- wilcox.test(richness ~ tissue_type, data = study1_data)
+cat("  p-value =", study1_rich$p.value, "\n") 
+# p value = 0.42
+
+#Study 2: Tumor vs Normal
+study2_rich <- wilcox.test(richness ~ tissue_type, data = study2_data)
+cat("  p-value =", study2_rich$p.value, "\n")
+# p value = 0.84
+
+# Calculate mean differences to see direction
+#Study 1 mean richness 
+cat("Study 1 mean richness: Tumor =", mean(study1_data$richness[study1_data$tissue_type == "tumor"]),
+    "vs Normal =", mean(study1_data$richness[study1_data$tissue_type == "normal"]), "\n")
+#Tumor = 222 vs Normal = 265.8 
+
+#Study 2 mean richness 
+cat("Study 2 mean richness: Tumor =", mean(study2_data$richness[study2_data$tissue_type == "tumor"]),
+    "vs Normal =", mean(study2_data$richness[study2_data$tissue_type == "normal"]), "\n")
+#Tumor = 173.2 vs Normal = 164.2 
+
+# Part B: Create 5 figures -----
+## Figure 1: Richness by Tissue Type ----
+fig1 <- ggplot(results, aes(x = tissue_type, y = richness, fill = tissue_type)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.6) +
+  scale_fill_manual(values = c("normal" = "#4ECDC4", "tumor" = "#FF6B6B")) +
+  labs(
+    title = "Bacterial Richness: Tumor vs Normal Tissue",
+    subtitle = paste("p =", round(richness_test$p.value, 4)),
+    x = "Tissue Type",
+    y = "Species Richness (# of unique taxa)"
+  ) +
+  theme(legend.position = "none")
+
+print(fig1)
+ggsave("Figure1_Richness_TissueType.png", fig1, path = "Figures/", width = 6, height = 5, dpi = 300)
+
+
+## Figure 2: Shannon Diversity by Tissue Type ----
+fig2 <- ggplot(results, aes(x = tissue_type, y = shannon, fill = tissue_type)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.6) +
+  scale_fill_manual(values = c("normal" = "#4ECDC4", "tumor" = "#FF6B6B")) +
+  labs(
+    title = "Shannon Diversity: Tumor vs Normal Tissue",
+    subtitle = paste("p =", round(shannon_test$p.value, 4)),
+    x = "Tissue Type",
+    y = "Shannon Diversity Index"
+  ) +
+  theme(legend.position = "none")
+
+print(fig2)
+ggsave("Figure2_Shannon_TissueType.png", fig2, path = "Figures/", width = 6, height = 5, dpi = 300)
+
+## Figure 3: Faith's PD by Tissue Type ----
+fig3 <- ggplot(results, aes(x = tissue_type, y = faith_pd, fill = tissue_type)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 3, alpha = 0.6) +
+  scale_fill_manual(values = c("normal" = "#4ECDC4", "tumor" = "#FF6B6B")) +
+  labs(
+    title = "Faith's Phylogenetic Diversity: Tumor vs Normal",
+    subtitle = paste("p =", round(faithpd_test$p.value, 4)),
+    x = "Tissue Type",
+    y = "Faith's PD (phylogenetic diversity)"
+  ) +
+  theme(legend.position = "none")
+
+print(fig3)
+ggsave("Figure3_FaithPD_TissueType.png", fig3, path = "Figures/", width = 6, height = 5, dpi = 300)
+
+## Figure 4: Richness by Study (Grouped Boxplot) ----
+# This shows if both studies have the same pattern
+fig4 <- ggplot(results, aes(x = study_id, y = richness, fill = tissue_type)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.2), 
+             size = 2, alpha = 0.6) +
+  scale_fill_manual(values = c("normal" = "#4ECDC4", "tumor" = "#FF6B6B")) +
+  labs(
+    title = "Richness Consistency Across Studies",
+    subtitle = "Checking if both studies show the same tumor vs normal pattern",
+    x = "Study",
+    y = "Species Richness",
+    fill = "Tissue Type"
+  ) +
+  theme(legend.position = "right")
+
+print(fig4)
+ggsave("Figure4_Richness_ByStudy.png", fig4, path = "Figures/", width = 7, height = 5, dpi = 300)
+
+## Figure 5: NMDS Ordination (Community Composition) ----
+# This shows if tumor and normal samples cluster separately based on their bacteria
+
+# Extract OTU table
+otu_mat <- as.matrix(otu_table(ps))
+
+# Run NMDS (this looks at overall bacterial community differences)
+set.seed(123)
+nmds <- metaMDS(otu_mat, distance = "bray", k = 2, trymax = 100)
+
+# Extract NMDS coordinates
+nmds_points <- data.frame(
+  NMDS1 = nmds$points[,1],
+  NMDS2 = nmds$points[,2],
+  sample_id = rownames(nmds$points)
+)
+
+# Add metadata
+nmds_data <- merge(nmds_points, results, by = "sample_id")
+
+# Create plot
+fig5 <- ggplot(nmds_data, aes(x = NMDS1, y = NMDS2, 
+                              color = tissue_type, shape = study_id)) +
+  geom_point(size = 4, alpha = 0.8) +
+  stat_ellipse(aes(group = tissue_type), level = 0.95, linetype = 2) +
+  scale_color_manual(values = c("normal" = "#4ECDC4", "tumor" = "#FF6B6B")) +
+  labs(
+    title = "Bacterial Community Clustering (NMDS)",
+    subtitle = paste("Stress =", round(nmds$stress, 3)),
+    color = "Tissue Type",
+    shape = "Study"
+  ) +
+  theme(legend.position = "right")
+
+print(fig5)
+ggsave("Figure5_NMDS_Communities.png", fig5, path = "Figures/", width = 7, height = 5, dpi = 300)
+
+# Test if communities are significantly different (PERMANOVA)
+# This asks: "Are the bacterial communities really different between tumor and normal?"
+permanova <- adonis2(otu_mat ~ tissue_type, data = results, method = "bray", permutations = 999)
+print(permanova)
+
+cat("\n✓ All figures saved successfully!\n")
+cat("✓ Statistical testing complete!\n")
