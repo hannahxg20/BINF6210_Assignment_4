@@ -10,5 +10,5 @@ Through this project I hope to explore the following research questions:
 #Q1:**Within the colon cancer environment, do tumor tissues show different biodiversity compared to adjacent normal tissues?**
 #Q2 (Secondary): **Are these patterns consistent across both studies?**
 
-**Important Notes**
-It takes about 4 hrs to run the entire script from beginning to end (Steps 1: Quality Control using DADA2 - Step 6: Statistical Testing & Visualization). Hence, to quicken this process, I have created "RDS_objects" folder, containing all the files needed to move throughout the script to help avoid the long wait time. In my script, I have created "Save Checkpoints" at the end of each step for RDS files that are required for the following steps. I also wrote code at the beginning of each step to load required RDS files if they are not already in memory. 
+**Important Note**
+It takes about 4 hrs to run the entire script from beginning to end (Steps 1: Quality Control using DADA2 - Step 6: Statistical Testing & Visualization). To account for this, I have created "RDS_objects" folder, containing all the files needed to move throughout the script to help avoid the long wait time and make it easier to start/stop at any step. In my script, I have created "Save Checkpoints" at the end of each step for RDS files that are required for the following steps. I also wrote code at the beginning of each step to load required RDS files if they are not already in memory. 
