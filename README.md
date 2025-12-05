@@ -7,7 +7,7 @@ For this project I randomly took 10 samples - 5 from tumor biopsies and 5 from n
 
 Through this project I hope to explore the following research questions: 
   
-#Q1:**Within the colon cancer environment, do tumor tissues show different biodiversity compared to adjacent normal tissues?**
+#Q1:**Within the colorectal cancer (CRC) environment, do tumor tissues show different biodiversity compared to adjacent normal tissues?**
 #Q2 (Secondary): **Are these patterns consistent across both studies?**
 
 **Important Note**
